@@ -1,37 +1,46 @@
 -------------------------------------------
--- Скрипт для обслуживания индексов указанной базы данных
+-- РЎРєСЂРёРїС‚ РґР»СЏ РѕР±СЃР»СѓР¶РёРІР°РЅРёСЏ РёРЅРґРµРєСЃРѕРІ СѓРєР°Р·Р°РЅРЅРѕР№ Р±Р°Р·С‹ РґР°РЅРЅС‹С…
 --
 -------------------------------------------
--- НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ
--- База данных для анализа
+-- РќРђРЎРўР РђРР’РђР•РњР«Р• РџРђР РђРњР•РўР Р«
+-- Р‘Р°Р·Р° РґР°РЅРЅС‹С… РґР»СЏ Р°РЅР°Р»РёР·Р°
 USE buhcorp
 
 -------------------------------------------
--- СЛУЖЕБНЫЕ ПЕРЕМЕННЫЕ 
-DECLARE @object_id int; -- ID объекта
-DECLARE @index_id int; -- ID индекса
-DECLARE @partition_number bigint; -- количество секций если индекс секционирован
-DECLARE @schemaname nvarchar(130); -- имя схемы в которой находится таблица
-DECLARE @objectname nvarchar(130); -- имя таблицы 
-DECLARE @indexname nvarchar(130); -- имя индекса
-DECLARE @partitionnum bigint; -- номер секции
-DECLARE @fragmentation_in_percent float; -- процент фрагментации индекса
-DECLARE @command nvarchar(4000); -- инструкция T-SQL для дефрагментации либо ренидексации
+-- РЎР›РЈР–Р•Р‘РќР«Р• РџР•Р Р•РњР•РќРќР«Р• 
+DECLARE @object_id int;
+-- ID РѕР±СЉРµРєС‚Р°
+DECLARE @index_id int;
+-- ID РёРЅРґРµРєСЃР°
+DECLARE @partition_number bigint;
+-- РєРѕР»РёС‡РµСЃС‚РІРѕ СЃРµРєС†РёР№ РµСЃР»Рё РёРЅРґРµРєСЃ СЃРµРєС†РёРѕРЅРёСЂРѕРІР°РЅ
+DECLARE @schemaname nvarchar(130);
+-- РёРјСЏ СЃС…РµРјС‹ РІ РєРѕС‚РѕСЂРѕР№ РЅР°С…РѕРґРёС‚СЃСЏ С‚Р°Р±Р»РёС†Р°
+DECLARE @objectname nvarchar(130);
+-- РёРјСЏ С‚Р°Р±Р»РёС†С‹ 
+DECLARE @indexname nvarchar(130);
+-- РёРјСЏ РёРЅРґРµРєСЃР°
+DECLARE @partitionnum bigint;
+-- РЅРѕРјРµСЂ СЃРµРєС†РёРё
+DECLARE @fragmentation_in_percent float;
+-- РїСЂРѕС†РµРЅС‚ С„СЂР°РіРјРµРЅС‚Р°С†РёРё РёРЅРґРµРєСЃР°
+DECLARE @command nvarchar(4000);
+-- РёРЅСЃС‚СЂСѓРєС†РёСЏ T-SQL РґР»СЏ РґРµС„СЂР°РіРјРµРЅС‚Р°С†РёРё Р»РёР±Рѕ СЂРµРЅРёРґРµРєСЃР°С†РёРё
 
 -------------------------------------------
--- ТЕЛО СКРИПТА
+-- РўР•Р›Рћ РЎРљР РРџРўРђ
 
--- Отключаем вывод количества возвращаемых строк, это несколько ускорит обработку
+-- РћС‚РєР»СЋС‡Р°РµРј РІС‹РІРѕРґ РєРѕР»РёС‡РµСЃС‚РІР° РІРѕР·РІСЂР°С‰Р°РµРјС‹С… СЃС‚СЂРѕРє, СЌС‚Рѕ РЅРµСЃРєРѕР»СЊРєРѕ СѓСЃРєРѕСЂРёС‚ РѕР±СЂР°Р±РѕС‚РєСѓ
 SET NOCOUNT ON;
 
--- Удалим временные таблицы, если вдруг они есть
+-- РЈРґР°Р»РёРј РІСЂРµРјРµРЅРЅС‹Рµ С‚Р°Р±Р»РёС†С‹, РµСЃР»Рё РІРґСЂСѓРі РѕРЅРё РµСЃС‚СЊ
 IF OBJECT_ID('tempdb.dbo.#work_to_do') IS NOT NULL DROP TABLE #work_to_do
 
--- Отбор таблиц и индексов с помощью системного представления sys.dm_db_index_physical_stats
--- Отбор только тех объектов которые:
---	являются индексами (index_id > 0)
---	фрагментация которых более 5% 
---	количество страниц в индексе более 128 
+-- РћС‚Р±РѕСЂ С‚Р°Р±Р»РёС† Рё РёРЅРґРµРєСЃРѕРІ СЃ РїРѕРјРѕС‰СЊСЋ СЃРёСЃС‚РµРјРЅРѕРіРѕ РїСЂРµРґСЃС‚Р°РІР»РµРЅРёСЏ sys.dm_db_index_physical_stats
+-- РћС‚Р±РѕСЂ С‚РѕР»СЊРєРѕ С‚РµС… РѕР±СЉРµРєС‚РѕРІ РєРѕС‚РѕСЂС‹Рµ:
+--	СЏРІР»СЏСЋС‚СЃСЏ РёРЅРґРµРєСЃР°РјРё (index_id > 0)
+--	С„СЂР°РіРјРµРЅС‚Р°С†РёСЏ РєРѕС‚РѕСЂС‹С… Р±РѕР»РµРµ 5% 
+--	РєРѕР»РёС‡РµСЃС‚РІРѕ СЃС‚СЂР°РЅРёС† РІ РёРЅРґРµРєСЃРµ Р±РѕР»РµРµ 128 
 SELECT
     object_id,
     index_id,
@@ -39,56 +48,57 @@ SELECT
     avg_fragmentation_in_percent AS fragmentation_in_percent
 INTO #work_to_do
 FROM sys.dm_db_index_physical_stats (DB_ID(), NULL, NULL , NULL, 'LIMITED')
-WHERE index_id > 0 
-	AND avg_fragmentation_in_percent > 5.0
-	AND page_count > 128;
+WHERE index_id > 0
+    AND avg_fragmentation_in_percent > 5.0
+    AND page_count > 128;
 
--- Объявление Открытие курсора курсора для чтения секций
-DECLARE partitions CURSOR FOR SELECT * FROM #work_to_do;
+-- РћР±СЉСЏРІР»РµРЅРёРµ РћС‚РєСЂС‹С‚РёРµ РєСѓСЂСЃРѕСЂР° РєСѓСЂСЃРѕСЂР° РґР»СЏ С‡С‚РµРЅРёСЏ СЃРµРєС†РёР№
+DECLARE partitions CURSOR FOR SELECT *
+FROM #work_to_do;
 OPEN partitions;
 
--- Цикл по секциям
+-- Р¦РёРєР» РїРѕ СЃРµРєС†РёСЏРј
 FETCH NEXT FROM partitions INTO @object_id, @index_id, @partition_number, @fragmentation_in_percent;
 WHILE @@FETCH_STATUS = 0
-    BEGIN		
-		
-	-- Собираем имена объектов по ID		
-        SELECT @objectname = QUOTENAME(o.name), @schemaname = QUOTENAME(s.name)
-        FROM sys.objects AS o
-		JOIN sys.schemas as s ON s.schema_id = o.schema_id
-        WHERE o.object_id = @object_id;
-        
-	SELECT @indexname = QUOTENAME(name)
-        FROM sys.indexes
-        WHERE  object_id = @object_id AND index_id = @index_id;
-        
-	SELECT @partition_number = count (*)
-        FROM sys.partitions
-        WHERE object_id = @object_id AND index_id = @index_id;
+    BEGIN
 
-	-- Если фрагментация менее или равна 30% тогда дефрагментация, иначе реиндексация
-        IF @fragmentation_in_percent < 30.0
+    -- РЎРѕР±РёСЂР°РµРј РёРјРµРЅР° РѕР±СЉРµРєС‚РѕРІ РїРѕ ID		
+    SELECT @objectname = QUOTENAME(o.name), @schemaname = QUOTENAME(s.name)
+    FROM sys.objects AS o
+        JOIN sys.schemas as s ON s.schema_id = o.schema_id
+    WHERE o.object_id = @object_id;
+
+    SELECT @indexname = QUOTENAME(name)
+    FROM sys.indexes
+    WHERE  object_id = @object_id AND index_id = @index_id;
+
+    SELECT @partition_number = count (*)
+    FROM sys.partitions
+    WHERE object_id = @object_id AND index_id = @index_id;
+
+    -- Р•СЃР»Рё С„СЂР°РіРјРµРЅС‚Р°С†РёСЏ РјРµРЅРµРµ РёР»Рё СЂР°РІРЅР° 30% С‚РѕРіРґР° РґРµС„СЂР°РіРјРµРЅС‚Р°С†РёСЏ, РёРЅР°С‡Рµ СЂРµРёРЅРґРµРєСЃР°С†РёСЏ
+    IF @fragmentation_in_percent < 30.0
             SET @command = N'ALTER INDEX ' + @indexname + N' ON ' + @schemaname + N'.' + @objectname + N' REORGANIZE';
-        IF @fragmentation_in_percent >= 30.0
+    IF @fragmentation_in_percent >= 30.0
             SET @command = N'ALTER INDEX ' + @indexname + N' ON ' + @schemaname + N'.' + @objectname + N' REBUILD';
-        IF @partition_number > 1
+    IF @partition_number > 1
             SET @command = @command + N' PARTITION=' + CAST(@partition_number AS nvarchar(10));
-		
-	-- Выполняем команду				
-        EXEC (@command);
-	PRINT N'Index: object_id=' + STR(@object_id) + ', index_id=' + STR(@index_id) + ', fragmentation_in_percent=' + STR(@fragmentation_in_percent);
-        PRINT N'Executed: ' + @command;
-		
-	-- Следующий элемент цикла
-	FETCH NEXT FROM partitions INTO @object_id, @index_id, @partition_number, @fragmentation_in_percent;
 
-	END;
+    -- Р’С‹РїРѕР»РЅСЏРµРј РєРѕРјР°РЅРґСѓ				
+    EXEC (@command);
+    PRINT N'Index: object_id=' + STR(@object_id) + ', index_id=' + STR(@index_id) + ', fragmentation_in_percent=' + STR(@fragmentation_in_percent);
+    PRINT N'Executed: ' + @command;
 
--- Закрытие курсора
+    -- РЎР»РµРґСѓСЋС‰РёР№ СЌР»РµРјРµРЅС‚ С†РёРєР»Р°
+    FETCH NEXT FROM partitions INTO @object_id, @index_id, @partition_number, @fragmentation_in_percent;
+
+END;
+
+-- Р—Р°РєСЂС‹С‚РёРµ РєСѓСЂСЃРѕСЂР°
 CLOSE partitions;
 DEALLOCATE partitions;
 
--- Удаление временной таблицы
+-- РЈРґР°Р»РµРЅРёРµ РІСЂРµРјРµРЅРЅРѕР№ С‚Р°Р±Р»РёС†С‹
 DROP TABLE #work_to_do;
 
 GO
